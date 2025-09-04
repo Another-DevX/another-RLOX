@@ -61,10 +61,10 @@ pub enum Literal {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
-    kind: TokenType,
-    lexeme: String,
-    literal: Option<Literal>,
-    line: usize,
+    pub kind: TokenType,
+    pub lexeme: String,
+    pub literal: Option<Literal>,
+    pub line: usize,
 }
 
 impl Token {
