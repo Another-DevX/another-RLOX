@@ -1,6 +1,7 @@
 #![feature(box_into_inner)]
 mod interpreter;
 mod lox;
+mod parser;
 mod scanner;
 mod token;
 
@@ -8,6 +9,7 @@ use std::io::{self, BufRead, Write};
 
 use interpreter::{AstInterpreter, Expr};
 use lox::Lox;
+use parser::Parser;
 use scanner::Scanner;
 use token::{Literal, Token};
 
@@ -64,10 +66,18 @@ fn run_prompt(lox: &mut Lox) {
 fn run(lox: &mut Lox, source: &str) {
     let mut scanner = Scanner::new(source, lox);
     let tokens = scanner.scan_tokens();
+    let mut parser = Parser::new(tokens.clone(), lox);
+    let expression = parser.parse().unwrap();
 
-    for token in tokens.iter() {
-        println!("{token}")
-    }
+    if lox.had_error {
+        return;
+    };
+
+    println!("{:?}", AstInterpreter.print(&expression));
+
+    // for token in tokens.iter() {
+    //     println!("{token}")
+    // }
 
     if lox.had_error {
         lox.clear_error();
