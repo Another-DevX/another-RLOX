@@ -1,7 +1,7 @@
 use std::io::{self, BufRead, Write};
 
 use crate::{
-    interpreter::{self, Interpreter, RuntimeError},
+    interpreter::{Interpreter, RuntimeError},
     parser::Parser,
     scanner::Scanner,
     token::{Token, TokenType},
@@ -25,17 +25,13 @@ impl Lox {
         let mut interpreter = Interpreter::new();
         let tokens = scanner.scan_tokens();
         let mut parser = Parser::new(tokens.clone(), self);
-        let expression = parser.parse().unwrap();
+        let statements = parser.parse().unwrap();
 
         if self.had_error {
             return;
         };
 
-        println!("{:?}", interpreter.interpret(self, expression));
-
-        // for token in tokens.iter() {
-        //     println!("{token}")
-        // }
+        println!("{:?}", interpreter.interpret(self, statements));
 
         if self.had_error {
             self.clear_error();

@@ -1,5 +1,5 @@
 use core::fmt;
-use std::{env::Vars, fmt::Display};
+use std::fmt::Display;
 
 use crate::interpreter::Value;
 

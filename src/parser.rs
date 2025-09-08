@@ -1,5 +1,5 @@
 use crate::{
-    interpreter::Expr,
+    interpreter::{Expr, Stmt},
     lox::Lox,
     token::{Literal, Token, TokenType},
 };
@@ -24,15 +24,35 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse(&mut self) -> Option<Expr> {
-        match self.expression() {
-            Ok(expr) => Some(expr),
-            Err(err) => None,
+    pub fn parse(&mut self) -> Option<Vec<Stmt>> {
+        let mut statements: Vec<Stmt> = Vec::new();
+        while !self.is_at_end() {
+            statements.push(self.statement());
         }
+        Some(statements)
+    }
+
+    fn statement(&mut self) -> Stmt {
+        if self._match(&[TokenType::Print]) {
+            return self.print_statement();
+        }
+        self.expression_statement()
+    }
+
+    fn print_statement(&mut self) -> Stmt {
+        let value = self.expression().unwrap();
+        let _ = self.consume(TokenType::Semicolon, "Expect ';' after value.");
+        Stmt::Print(value)
+    }
+
+    fn expression_statement(&mut self) -> Stmt {
+        let expr = self.expression().unwrap();
+        let _ = self.consume(TokenType::Semicolon, "Expect ';' after expression");
+        Stmt::Expression(expr)
     }
 
     fn expression(&mut self) -> Result<Expr, ParseError> {
-        return self.equality();
+        self.equality()
     }
 
     fn equality(&mut self) -> Result<Expr, ParseError> {
@@ -119,7 +139,7 @@ impl<'a> Parser<'a> {
         ParseError
     }
 
-    fn synchronize(&mut self) {
+    fn _synchronize(&mut self) {
         self.advance();
 
         while !self.is_at_end() {

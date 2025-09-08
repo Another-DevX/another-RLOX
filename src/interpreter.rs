@@ -17,6 +17,11 @@ pub enum Expr {
     },
 }
 
+pub enum Stmt {
+    Expression(Expr),
+    Print(Expr),
+}
+
 #[derive(Clone)]
 pub enum Value {
     Nil,
@@ -46,13 +51,34 @@ impl Interpreter {
         Interpreter
     }
 
-    pub fn interpret(&mut self, lox: &mut Lox, expr: Expr) {
-        match self.evaluate(&expr) {
-            Ok(value) => {
+    pub fn interpret(&mut self, lox: &mut Lox, statements: Vec<Stmt>) {
+        for statement in statements.iter() {
+            match self.execute(statement) {
+                Ok(()) => {}
+                Err(error) => lox.runtime_error(error),
+            };
+        }
+
+        // match self.evaluate(&expr) {
+        //     Ok(value) => {
+        //         println!("{}", self.stringify(value));
+        //     }
+        //     Err(error) => lox.runtime_error(error),
+        // };
+    }
+
+    fn execute(&mut self, stmt: &Stmt) -> Result<(), RuntimeError> {
+        match stmt {
+            Stmt::Expression(expr) => match self.evaluate(expr) {
+                Ok(_) => Ok(()),
+                Err(error) => Err(error),
+            },
+            Stmt::Print(expr) => {
+                let value = self.evaluate(expr)?;
                 println!("{}", self.stringify(value));
+                Ok(())
             }
-            Err(error) => lox.runtime_error(error),
-        };
+        }
     }
 
     fn evaluate(&mut self, expr: &Expr) -> Result<Value, RuntimeError> {
