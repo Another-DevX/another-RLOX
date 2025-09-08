@@ -1,5 +1,7 @@
 use core::fmt;
-use std::fmt::Display;
+use std::{env::Vars, fmt::Display};
+
+use crate::interpreter::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenType {
@@ -57,6 +59,17 @@ pub enum Literal {
     Str(String),
     Bool(bool),
     Nil,
+}
+
+impl From<Literal> for Value {
+    fn from(literal: Literal) -> Self {
+        match literal {
+            Literal::Number(n) => Value::Number(n),
+            Literal::Str(s) => Value::Str(s),
+            Literal::Bool(b) => Value::Bool(b),
+            Literal::Nil => Value::Nil,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
