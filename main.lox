@@ -5,3 +5,6 @@ print 2 + 1;
 var beverage = "espresso";
 
 print beverage;
+ 
+var a = 1; 
+print a = 2;

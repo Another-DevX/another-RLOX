@@ -31,7 +31,8 @@ impl Lox {
             return;
         };
 
-        println!("{:?}", interpreter.interpret(self, statements));
+        // println!("{:?}", interpreter.interpret(self, statements));
+        interpreter.interpret(self, statements);
 
         if self.had_error {
             self.clear_error();

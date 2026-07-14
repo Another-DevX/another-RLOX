@@ -1,9 +1,9 @@
-#![feature(box_into_inner)]
 mod interpreter;
 mod lox;
 mod parser;
 mod scanner;
 mod token;
+mod environment;
 
 use lox::Lox;
 

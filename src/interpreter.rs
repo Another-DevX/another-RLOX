@@ -1,4 +1,8 @@
+use std::collections::vec_deque::IntoIter;
+
 use crate::{
+    environment::Environment,
+    interpreter::Value::Nil,
     lox::Lox,
     token::{Literal, Token, TokenType},
 };
@@ -15,11 +19,22 @@ pub enum Expr {
         operator: Token,
         right: Box<Expr>,
     },
+    Variable {
+        name: Token,
+    },
+    Assignment {
+        name: Token,
+        value: Box<Expr>,
+    },
 }
 
 pub enum Stmt {
     Expression(Expr),
     Print(Expr),
+    Var {
+        name: Token,
+        initializer: Option<Expr>,
+    },
 }
 
 #[derive(Clone)]
@@ -44,11 +59,15 @@ impl RuntimeError {
     }
 }
 
-pub struct Interpreter;
+pub struct Interpreter {
+    environment: Environment,
+}
 
 impl Interpreter {
     pub fn new() -> Self {
-        Interpreter
+        Interpreter {
+            environment: Environment::new(),
+        }
     }
 
     pub fn interpret(&mut self, lox: &mut Lox, statements: Vec<Stmt>) {
@@ -76,6 +95,16 @@ impl Interpreter {
             Stmt::Print(expr) => {
                 let value = self.evaluate(expr)?;
                 println!("{}", self.stringify(value));
+                Ok(())
+            }
+            Stmt::Var { name, initializer } => {
+                let value = if let Some(expr) = initializer {
+                    self.evaluate(expr)?
+                } else {
+                    Value::Nil
+                };
+
+                self.environment.define(&name.lexeme, value);
                 Ok(())
             }
         }
@@ -178,6 +207,15 @@ impl Interpreter {
 
                     _ => Ok(Value::Nil),
                 }
+            }
+            Expr::Assignment { name, value } => {
+                let value = self.evaluate(value)?;
+                self.environment.assign(name, value.clone())?;
+                Ok(value)
+            }
+            Expr::Variable { name } => {
+                let variable = self.environment.get(name)?;
+                Ok(variable)
             }
         }
     }
