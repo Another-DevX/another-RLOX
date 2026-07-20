@@ -1,10 +1,12 @@
-use std::collections::vec_deque::IntoIter;
+use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     environment::Environment,
-    interpreter::Value::Nil,
     lox::Lox,
-    token::{Literal, Token, TokenType},
+    token::{
+        Literal, Token,
+        TokenType::{self},
+    },
 };
 
 pub enum Expr {
@@ -15,6 +17,11 @@ pub enum Expr {
     },
     Grouping(Box<Expr>),
     Literal(Literal),
+    Logical {
+        left: Box<Expr>,
+        operator: Token,
+        right: Box<Expr>,
+    },
     Unary {
         operator: Token,
         right: Box<Expr>,
@@ -30,11 +37,21 @@ pub enum Expr {
 
 pub enum Stmt {
     Expression(Expr),
+    If {
+        condition: Expr,
+        then_branch: Box<Stmt>,
+        else_branch: Option<Box<Stmt>>,
+    },
+    While {
+        condition: Expr,
+        body: Box<Stmt>,
+    },
     Print(Expr),
     Var {
         name: Token,
         initializer: Option<Expr>,
     },
+    Block(Vec<Stmt>),
 }
 
 #[derive(Clone)]
@@ -60,13 +77,13 @@ impl RuntimeError {
 }
 
 pub struct Interpreter {
-    environment: Environment,
+    environment: Rc<RefCell<Environment>>,
 }
 
 impl Interpreter {
     pub fn new() -> Self {
         Interpreter {
-            environment: Environment::new(),
+            environment: Rc::new(RefCell::new(Environment::default())),
         }
     }
 
@@ -87,33 +104,98 @@ impl Interpreter {
     }
 
     fn execute(&mut self, stmt: &Stmt) -> Result<(), RuntimeError> {
+        use Stmt::*;
         match stmt {
-            Stmt::Expression(expr) => match self.evaluate(expr) {
+            Expression(expr) => match self.evaluate(expr) {
                 Ok(_) => Ok(()),
                 Err(error) => Err(error),
             },
-            Stmt::Print(expr) => {
+            If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                let condition = self.evaluate(condition)?;
+                if self.is_truthy(&condition) {
+                    self.execute(then_branch)?;
+                } else if let Some(else_branch) = else_branch {
+                    self.execute(else_branch)?;
+                }
+
+                Ok(())
+            }
+
+            While { condition, body } => {
+
+                loop {
+                    let condition = self.evaluate(condition)?;
+                    if !self.is_truthy(&condition) {
+                        break;
+                    }
+                    self.execute(body)?;
+                }
+
+                Ok(())
+            }
+
+            Print(expr) => {
                 let value = self.evaluate(expr)?;
                 println!("{}", self.stringify(value));
                 Ok(())
             }
-            Stmt::Var { name, initializer } => {
+            Var { name, initializer } => {
                 let value = if let Some(expr) = initializer {
                     self.evaluate(expr)?
                 } else {
                     Value::Nil
                 };
 
-                self.environment.define(&name.lexeme, value);
+                self.environment.borrow_mut().define(&name.lexeme, value);
                 Ok(())
             }
+            Block(statements) => self.execute_block(
+                statements,
+                Rc::new(RefCell::new(Environment::new(Some(
+                    self.environment.clone(),
+                )))),
+            ),
         }
+    }
+
+    fn execute_block(
+        &mut self,
+        statements: &Vec<Stmt>,
+        environment: Rc<RefCell<Environment>>,
+    ) -> Result<(), RuntimeError> {
+        let previous = Rc::clone(&self.environment);
+
+        self.environment = environment;
+        let result = statements.iter().try_for_each(|stmt| self.execute(stmt));
+
+        self.environment = previous;
+
+        result
     }
 
     fn evaluate(&mut self, expr: &Expr) -> Result<Value, RuntimeError> {
         match expr {
             Expr::Literal(value) => Ok(value.clone().into()),
             Expr::Grouping(inner) => self.evaluate(inner),
+            Expr::Logical {
+                left,
+                operator,
+                right,
+            } => {
+                let left = self.evaluate(left)?;
+                let is_truthy = self.is_truthy(&left);
+
+                match operator.kind {
+                    TokenType::Or if is_truthy => return Ok(left),
+                    TokenType::And if !is_truthy => return Ok(left),
+                    TokenType::Or | TokenType::And => self.evaluate(right),
+                    _ => unreachable!("Invalid logical operator"),
+                }
+            }
             Expr::Unary { operator, right } => {
                 let right = self.evaluate(right)?;
 
@@ -125,7 +207,7 @@ impl Interpreter {
                             Err(self.number_operand_error(operator))
                         }
                     }
-                    TokenType::Bang => Ok(Value::Bool(!self.is_truthy(right))),
+                    TokenType::Bang => Ok(Value::Bool(!self.is_truthy(&right))),
                     _ => Ok(Value::Nil),
                 }
             }
@@ -201,20 +283,20 @@ impl Interpreter {
                         _ => Err(self.number_operands_error(operator)),
                     },
 
-                    TokenType::BangEqual => Ok(Value::Bool(!self.is_equal(left, right))),
+                    TokenType::BangEqual => Ok(Value::Bool(!self.is_equal(&left, &right))),
 
-                    TokenType::EqualEqual => Ok(Value::Bool(self.is_equal(left, right))),
+                    TokenType::EqualEqual => Ok(Value::Bool(self.is_equal(&left, &right))),
 
                     _ => Ok(Value::Nil),
                 }
             }
             Expr::Assignment { name, value } => {
                 let value = self.evaluate(value)?;
-                self.environment.assign(name, value.clone())?;
+                self.environment.borrow_mut().assign(name, value.clone())?;
                 Ok(value)
             }
             Expr::Variable { name } => {
-                let variable = self.environment.get(name)?;
+                let variable = self.environment.borrow().get(name)?;
                 Ok(variable)
             }
         }
@@ -228,15 +310,15 @@ impl Interpreter {
         RuntimeError::new(operator.clone(), "Operands must be a number.")
     }
 
-    fn is_truthy(&mut self, val: Value) -> bool {
+    fn is_truthy(&mut self, val: &Value) -> bool {
         match val {
             Value::Nil => false,
-            Value::Bool(b) => b,
+            Value::Bool(b) => *b,
             _ => true,
         }
     }
 
-    fn is_equal(&mut self, left: Value, right: Value) -> bool {
+    fn is_equal(&mut self, left: &Value, right: &Value) -> bool {
         match (left, right) {
             (Value::Bool(l), Value::Bool(r)) => l == r,
             (Value::Nil, Value::Nil) => true,
