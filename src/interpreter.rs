@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, ops::ControlFlow, process::Output, rc::Rc, result};
 
 use crate::{
     environment::Environment,
@@ -52,6 +52,7 @@ pub enum Stmt {
         initializer: Option<Expr>,
     },
     Block(Vec<Stmt>),
+    Break,
 }
 
 #[derive(Clone)]
@@ -65,6 +66,10 @@ pub enum Value {
 pub struct RuntimeError {
     pub token: Token,
     pub message: String,
+}
+
+pub enum Signal {
+    Break,
 }
 
 impl RuntimeError {
@@ -90,8 +95,9 @@ impl Interpreter {
     pub fn interpret(&mut self, lox: &mut Lox, statements: Vec<Stmt>) {
         for statement in statements.iter() {
             match self.execute(statement) {
-                Ok(()) => {}
+                Ok(None) => {}
                 Err(error) => lox.runtime_error(error),
+                _ => {}
             };
         }
 
@@ -103,11 +109,11 @@ impl Interpreter {
         // };
     }
 
-    fn execute(&mut self, stmt: &Stmt) -> Result<(), RuntimeError> {
+    fn execute(&mut self, stmt: &Stmt) -> Result<Option<Signal>, RuntimeError> {
         use Stmt::*;
         match stmt {
             Expression(expr) => match self.evaluate(expr) {
-                Ok(_) => Ok(()),
+                Ok(_) => Ok(None),
                 Err(error) => Err(error),
             },
             If {
@@ -116,32 +122,36 @@ impl Interpreter {
                 else_branch,
             } => {
                 let condition = self.evaluate(condition)?;
+                let mut signal = None;
                 if self.is_truthy(&condition) {
-                    self.execute(then_branch)?;
+                    signal = self.execute(then_branch)?
                 } else if let Some(else_branch) = else_branch {
-                    self.execute(else_branch)?;
+                    signal = self.execute(else_branch)?;
                 }
 
-                Ok(())
+                return Ok(signal);
             }
 
             While { condition, body } => {
-
                 loop {
                     let condition = self.evaluate(condition)?;
                     if !self.is_truthy(&condition) {
                         break;
                     }
-                    self.execute(body)?;
+                    if self
+                        .execute(body)?
+                        .is_some_and(|signal| matches!(signal, Signal::Break))
+                    {
+                        break;
+                    }
                 }
 
-                Ok(())
+                Ok(None)
             }
-
             Print(expr) => {
                 let value = self.evaluate(expr)?;
                 println!("{}", self.stringify(value));
-                Ok(())
+                Ok(None)
             }
             Var { name, initializer } => {
                 let value = if let Some(expr) = initializer {
@@ -151,7 +161,7 @@ impl Interpreter {
                 };
 
                 self.environment.borrow_mut().define(&name.lexeme, value);
-                Ok(())
+                Ok(None)
             }
             Block(statements) => self.execute_block(
                 statements,
@@ -159,6 +169,7 @@ impl Interpreter {
                     self.environment.clone(),
                 )))),
             ),
+            Break => Ok(Some(Signal::Break)),
         }
     }
 
@@ -166,15 +177,23 @@ impl Interpreter {
         &mut self,
         statements: &Vec<Stmt>,
         environment: Rc<RefCell<Environment>>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<Option<Signal>, RuntimeError> {
         let previous = Rc::clone(&self.environment);
 
         self.environment = environment;
-        let result = statements.iter().try_for_each(|stmt| self.execute(stmt));
+        let result = statements
+            .iter()
+            .try_for_each(|stmt| match self.execute(stmt) {
+                Ok(None) => ControlFlow::Continue(()),
+                result => ControlFlow::Break(result),
+            });
 
         self.environment = previous;
 
-        result
+        match result {
+            ControlFlow::Continue(()) => Ok(None),
+            ControlFlow::Break(result) => result,
+        }
     }
 
     fn evaluate(&mut self, expr: &Expr) -> Result<Value, RuntimeError> {
@@ -322,6 +341,7 @@ impl Interpreter {
         match (left, right) {
             (Value::Bool(l), Value::Bool(r)) => l == r,
             (Value::Nil, Value::Nil) => true,
+            (Value::Number(a), Value::Number(b)) => a == b,
             _ => false,
         }
     }

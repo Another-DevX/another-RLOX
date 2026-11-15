@@ -1,4 +1,4 @@
-use std::fmt::Error;
+use std::result;
 
 use crate::{
     interpreter::{Expr, Stmt},
@@ -6,7 +6,7 @@ use crate::{
     token::{
         Literal::{self},
         Token,
-        TokenType::{self, RightBrace, While},
+        TokenType::{self, RightBrace},
     },
 };
 
@@ -18,6 +18,7 @@ pub struct ParseError;
 pub struct Parser<'a> {
     tokens: Vec<Token>,
     current: usize,
+    loop_depth: usize,
     lox: &'a mut Lox,
 }
 
@@ -26,6 +27,7 @@ impl<'a> Parser<'a> {
         Self {
             tokens,
             current: 0,
+            loop_depth: 0,
             lox,
         }
     }
@@ -73,6 +75,10 @@ impl<'a> Parser<'a> {
         if self._match(&[TokenType::LeftBrace]) {
             return Ok(Stmt::Block(self.block()?));
         }
+
+        if self._match(&[TokenType::Break]) {
+            return self.break_statement();
+        }
         self.expression_statement()
     }
 
@@ -99,10 +105,19 @@ impl<'a> Parser<'a> {
         self.consume(TokenType::LeftParen, "Expect '(' after 'while'.")?;
         let condition = self.expression()?;
         self.consume(TokenType::RightParen, "Expect ')' after while condition.")?;
+        self.loop_depth += 1;
 
-        let body = Box::new(self.statement()?);
-
-        return Ok(Stmt::While { condition, body });
+        match self.statement() {
+            Ok(result) => {
+                let body = Box::new(result);
+                self.loop_depth -= 1;
+                return Ok(Stmt::While { condition, body });
+            }
+            Err(err) => {
+                self.loop_depth -= 1;
+                Err(err)
+            }
+        }
     }
 
     fn for_statement(&mut self) -> Result<Stmt, ParseError> {
@@ -132,7 +147,18 @@ impl<'a> Parser<'a> {
 
         self.consume(TokenType::RightParen, "Expect ')' after for clauses.")?;
 
-        let mut body = self.statement()?;
+        self.loop_depth += 1;
+
+        let mut body = match self.statement() {
+            Ok(result) => {
+                self.loop_depth -= 1;
+                Ok(result)
+            }
+            Err(err) => {
+                self.loop_depth -= 1;
+                Err(err)
+            }
+        }?;
 
         if let Some(increment) = increment {
             body = Stmt::Block(vec![body, Stmt::Expression(increment)]);
@@ -161,6 +187,17 @@ impl<'a> Parser<'a> {
         let value = self.expression()?;
         let _ = self.consume(TokenType::Semicolon, "Expect ';' after value.")?;
         Ok(Stmt::Print(value))
+    }
+
+    fn break_statement(&mut self) -> Result<Stmt, ParseError> {
+        let token = self
+            .consume(TokenType::Semicolon, "Expect ';' after value.")?
+            .clone();
+
+        if self.loop_depth == 0 {
+            return Err(self.error(&token, "break statement outside a loop."));
+        }
+        Ok(Stmt::Break)
     }
 
     fn var_statement(&mut self) -> Result<Stmt, ParseError> {

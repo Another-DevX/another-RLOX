@@ -26,6 +26,7 @@ pub static KEYWORDS: LazyLock<HashMap<&str, TokenType>> = std::sync::LazyLock::n
     m.insert("nil", TokenType::Nil);
     m.insert("or", TokenType::Or);
     m.insert("print", TokenType::Print);
+    m.insert("break", TokenType::Break);
     m.insert("return", TokenType::Return);
     m.insert("super", TokenType::Super);
     m.insert("this", TokenType::This);
