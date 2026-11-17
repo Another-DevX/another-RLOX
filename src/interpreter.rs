@@ -1,4 +1,10 @@
-use std::{cell::RefCell, ops::ControlFlow, process::Output, rc::Rc, result};
+use std::{
+    cell::RefCell,
+    iter::zip,
+    ops::ControlFlow,
+    rc::Rc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use crate::{
     environment::Environment,
@@ -9,6 +15,57 @@ use crate::{
     },
 };
 
+pub trait Callable {
+    fn arity(&self) -> usize;
+    fn call(
+        &self,
+        interpreter: &mut Interpreter,
+        arguments: Vec<Value>,
+    ) -> Result<Value, RuntimeError>;
+    fn to_string(&self) -> String;
+}
+
+struct Function {
+    declaration: Stmt,
+    closure: Rc<RefCell<Environment>>,
+}
+
+impl Callable for Function {
+    fn arity(&self) -> usize {
+        match &self.declaration {
+            Stmt::Function { params, .. } => params.len(),
+            _ => unreachable!("Function must contains a function."),
+        }
+    }
+
+    fn call(
+        &self,
+        interpreter: &mut Interpreter,
+        arguments: Vec<Value>,
+    ) -> Result<Value, RuntimeError> {
+        let mut environment = Environment::new(Some(Rc::clone(&self.closure)));
+        match &self.declaration {
+            Stmt::Function { params, body, .. } => {
+                for (param, argument) in zip(params.iter(), arguments.iter()) {
+                    environment.define(&param.lexeme, argument.clone());
+                }
+                interpreter.execute_block(&body, Rc::new(RefCell::new(environment)))?;
+            }
+            _ => unreachable!("Function must contains a function."),
+        };
+
+        Ok(Value::Nil)
+    }
+
+    fn to_string(&self) -> String {
+        match &self.declaration {
+            Stmt::Function { name, .. } => format!("<fn {}>", name.lexeme),
+            _ => unreachable!("Function must contains a function."),
+        }
+    }
+}
+
+#[derive(Clone)]
 pub enum Expr {
     Binary {
         left: Box<Expr>,
@@ -33,8 +90,13 @@ pub enum Expr {
         name: Token,
         value: Box<Expr>,
     },
+    Call {
+        callee: Box<Expr>,
+        paren: Token,
+        arguments: Vec<Expr>,
+    },
 }
-
+#[derive(Clone)]
 pub enum Stmt {
     Expression(Expr),
     If {
@@ -52,6 +114,11 @@ pub enum Stmt {
         initializer: Option<Expr>,
     },
     Block(Vec<Stmt>),
+    Function {
+        name: Token,
+        params: Vec<Token>,
+        body: Vec<Stmt>,
+    },
     Break,
 }
 
@@ -61,6 +128,7 @@ pub enum Value {
     Bool(bool),
     Number(f64),
     Str(String),
+    Callable(Rc<dyn Callable>),
 }
 
 pub struct RuntimeError {
@@ -82,13 +150,42 @@ impl RuntimeError {
 }
 
 pub struct Interpreter {
+    globals: Rc<RefCell<Environment>>,
     environment: Rc<RefCell<Environment>>,
 }
 
 impl Interpreter {
     pub fn new() -> Self {
+        struct Clock;
+
+        impl Callable for Clock {
+            fn arity(&self) -> usize {
+                0
+            }
+
+            fn call(&self, _: &mut Interpreter, _: Vec<Value>) -> Result<Value, RuntimeError> {
+                Ok(Value::Number(
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .expect("System time is before the Unix epoch")
+                        .as_secs_f64() as f64,
+                ))
+            }
+
+            fn to_string(&self) -> String {
+                "<native fn>".to_owned()
+            }
+        }
+
+        let globals = Rc::new(RefCell::new(Environment::default()));
+
+        globals
+            .borrow_mut()
+            .define("clock", Value::Callable(Rc::new(Clock)));
+
         Interpreter {
-            environment: Rc::new(RefCell::new(Environment::default())),
+            globals: Rc::clone(&globals),
+            environment: Rc::clone(&globals),
         }
     }
 
@@ -169,6 +266,16 @@ impl Interpreter {
                     self.environment.clone(),
                 )))),
             ),
+            Function { name, .. } => {
+                let function = self::Function {
+                    declaration: stmt.clone(),
+                    closure: Rc::clone(&self.environment),
+                };
+                self.environment
+                    .borrow_mut()
+                    .define(&name.lexeme, Value::Callable(Rc::new(function)));
+                Ok(None)
+            }
             Break => Ok(Some(Signal::Break)),
         }
     }
@@ -318,6 +425,40 @@ impl Interpreter {
                 let variable = self.environment.borrow().get(name)?;
                 Ok(variable)
             }
+            Expr::Call {
+                callee,
+                paren,
+                arguments,
+            } => {
+                let _callee = self.evaluate(&callee)?;
+                let mut _arguments = Vec::new();
+
+                for arg in arguments.iter() {
+                    _arguments.push(self.evaluate(arg)?);
+                }
+
+                match _callee {
+                    Value::Callable(function) => {
+                        if _arguments.len() != function.arity() {
+                            return Err(RuntimeError::new(
+                                paren.clone(),
+                                &format!(
+                                    "Expected {} arguments but got {}.",
+                                    function.arity(),
+                                    _arguments.len()
+                                ),
+                            ));
+                        }
+
+                        function.call(self, _arguments)
+                    }
+
+                    _ => Err(RuntimeError::new(
+                        paren.clone(),
+                        "Can only call functions and classes.",
+                    )),
+                }
+            }
         }
     }
 
@@ -359,6 +500,7 @@ impl Interpreter {
                     text
                 }
             }
+            Value::Callable(callable) => callable.to_string(),
         }
     }
 }

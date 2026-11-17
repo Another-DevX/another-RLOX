@@ -37,3 +37,32 @@ while (lucho < 1000) {
 
   lucho = lucho + 1;
 }
+
+fun luchito(a, b, c) {
+
+  print a + b + c;
+
+
+}
+
+print luchito;
+
+fun sayHi(first, last) {
+  print "Hi, " + first + " " + last + "!";
+}
+
+sayHi("Dear", "Reader");
+
+fun makeCounter() {
+  var i = 0;
+  fun count() {
+    i = i + 1;
+    print i;
+  }
+
+  return count;
+}
+
+var counter = makeCounter();
+counter(); // "1".
+counter(); // "2"
