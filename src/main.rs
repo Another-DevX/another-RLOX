@@ -4,6 +4,7 @@ mod parser;
 mod scanner;
 mod token;
 mod environment;
+mod resolver;
 
 use lox::Lox;
 

@@ -120,6 +120,7 @@ pub enum Stmt {
         body: Vec<Stmt>,
     },
     Break,
+    Return(Option<Box<Stmt>>),
 }
 
 #[derive(Clone)]
